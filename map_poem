@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map Poem</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #f5f5f0;
+            padding: 40px 20px;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            position: relative;
+            min-height: 800px;
+        }
+
+        .title {
+            text-align: center;
+            font-size: 1.2em;
+            margin-bottom: 20px;
+            color: #333;
+            font-weight: normal;
+            letter-spacing: 2px;
+        }
+
+        /* Current Poem Display */
+        .current-poem {
+            background: #fff;
+            border: 2px solid #333;
+            padding: 20px;
+            margin: 20px auto 40px;
+            max-width: 600px;
+            min-height: 120px;
+        }
+
+        .current-poem h3 {
+            font-size: 1em;
+            margin-bottom: 10px;
+            color: #666;
+            font-weight: normal;
+            letter-spacing: 1px;
+        }
+
+        .poem-text {
+            font-size: 1.1em;
+            line-height: 1.8;
+            color: #333;
+            min-height: 60px;
+        }
+
+        .poem-text.empty {
+            color: #999;
+            font-style: italic;
+        }
+
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .controls button {
+            padding: 8px 16px;
+            background: #333;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            transition: all 0.3s;
+        }
+
+        .controls button:hover {
+            background: #555;
+        }
+
+        /* SVG Canvas for lines */
+        .line-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Center node */
+        .center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 10;
+        }
+
+        .center-word {
+            font-size: 2.5em;
+            font-weight: bold;
+            padding: 20px 30px;
+            border: 3px solid #333;
+            background: #fff;
+            display: inline-block;
+            position: relative;
+            z-index: 10;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .center-word:hover {
+            background: #fffacd;
+        }
+
+        .center-flanking {
+            font-size: 1.5em;
+            color: #666;
+            margin: 0 15px;
+        }
+
+        /* Branch nodes */
+        .branch {
+            position: absolute;
+            background: #fff;
+            padding: 12px 20px;
+            border: 2px solid #666;
+            font-size: 1.1em;
+            white-space: nowrap;
+            transition: all 0.3s;
+            cursor: pointer;
+            z-index: 10;
+        }
+
+        .branch:hover {
+            background: #f0f0f0;
+            border-color: #333;
+            transform: scale(1.05);
+        }
+
+        .branch.selected {
+            background: #333;
+            color: #fff;
+            border-color: #333;
+        }
+
+        .branch.in-path {
+            background: #4a90e2;
+            color: #fff;
+            border-color: #4a90e2;
+        }
+
+        /* Specific positioning for readability */
+        
+        /* Upper branches */
+        .b1 { top: 15%; left: 20%; }
+        .b2 { top: 8%; left: 40%; }
+        .b3 { top: 12%; left: 60%; }
+        .b4 { top: 18%; left: 78%; }
+
+        /* Upper-middle branches */
+        .b5 { top: 28%; left: 10%; }
+        .b6 { top: 25%; left: 85%; }
+        .b7 { top: 32%; left: 70%; }
+
+        /* Middle branches */
+        .b8 { top: 45%; left: 5%; }
+        .b9 { top: 48%; left: 88%; }
+
+        /* Lower-middle branches */
+        .b10 { top: 62%; left: 8%; }
+        .b11 { top: 65%; left: 75%; }
+        .b12 { top: 58%; left: 30%; }
+
+        /* Lower branches */
+        .b13 { top: 75%; left: 15%; }
+        .b14 { top: 78%; left: 45%; }
+        .b15 { top: 82%; left: 70%; }
+        .b16 { top: 88%; left: 35%; }
+
+        .instructions {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+            font-size: 0.95em;
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            .center-word {
+                font-size: 1.8em;
+                padding: 15px 20px;
+            }
+            
+            .branch {
+                font-size: 0.9em;
+                padding: 8px 12px;
+            }
+
+            .title {
+                font-size: 1em;
+            }
+
+            .current-poem {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="title">MAP POEM (Preliminary)</div>
+    
+    <div class="current-poem">
+        <h3>YOUR POEM:</h3>
+        <div class="poem-text empty">Click phrases to build your poem...</div>
+        <div class="controls">
+            <button id="clear-btn">Clear</button>
+            <button id="copy-btn">Copy Poem</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <svg class="line-canvas" id="line-canvas"></svg>
+        
+        <div class="center">
+            <span class="center-flanking">that</span>
+            <span class="center-word" id="center">POEM</span>
+            <span class="center-flanking">for</span>
+        </div>
+
+        <!-- Upper quadrant -->
+        <div class="branch b1">drifts in forming shore</div>
+        <div class="branch b2">what color certain do you pull inside</div>
+        <div class="branch b3">one layer folding another aloud</div>
+        <div class="branch b4">these cascades in the tiered accumulation</div>
+
+        <!-- Upper-middle -->
+        <div class="branch b5">deserves</div>
+        <div class="branch b6">from back inside</div>
+        <div class="branch b7">of the purifying function</div>
+
+        <!-- Middle -->
+        <div class="branch b8">in memory remembering</div>
+        <div class="branch b9">mourning grieves</div>
+
+        <!-- Lower-middle -->
+        <div class="branch b10">renewal</div>
+        <div class="branch b11">or a long time never a poet, canned earthworm</div>
+        <div class="branch b12">so renewal takes place</div>
+
+        <!-- Lower -->
+        <div class="branch b13">an arc of pebbles when strewn</div>
+        <div class="branch b14">turning to contusion</div>
+        <div class="branch b15">spiral grotto and bottled hollow understanding</div>
+        <div class="branch b16">___</div>
+
+        <div class="instructions">
+            Hover over phrases to explore paths through the poem
+        </div>
+    </div>
+
+    <script>
+        // State management
+        let currentPath = [];
+        const poemText = document.querySelector('.poem-text');
+        const branches = document.querySelectorAll('.branch');
+        const center = document.getElementById('center');
+        const svg = document.getElementById('line-canvas');
+        const clearBtn = document.getElementById('clear-btn');
+        const copyBtn = document.getElementById('copy-btn');
+
+        // Get element center position
+        function getCenter(element) {
+            const rect = element.getBoundingClientRect();
+            const containerRect = document.querySelector('.container').getBoundingClientRect();
+            return {
+                x: rect.left + rect.width / 2 - containerRect.left,
+                y: rect.top + rect.height / 2 - containerRect.top
+            };
+        }
+
+        // Draw line between two elements
+        function drawLine(from, to, color = '#4a90e2') {
+            const fromPos = getCenter(from);
+            const toPos = getCenter(to);
+            
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', fromPos.x);
+            line.setAttribute('y1', fromPos.y);
+            line.setAttribute('x2', toPos.x);
+            line.setAttribute('y2', toPos.y);
+            line.setAttribute('stroke', color);
+            line.setAttribute('stroke-width', '3');
+            line.setAttribute('class', 'path-line');
+            
+            svg.appendChild(line);
+        }
+
+        // Update the poem display
+        function updatePoem() {
+            if (currentPath.length === 0) {
+                poemText.textContent = 'Click phrases to build your poem...';
+                poemText.classList.add('empty');
+            } else {
+                poemText.innerHTML = currentPath.join('<br>');
+                poemText.classList.remove('empty');
+            }
+        }
+
+        // Redraw all connections
+        function redrawConnections() {
+            // Clear existing lines
+            const lines = svg.querySelectorAll('.path-line');
+            lines.forEach(line => line.remove());
+
+            // Draw lines from center to first element, then between consecutive elements
+            const pathElements = document.querySelectorAll('.in-path');
+            if (pathElements.length > 0) {
+                drawLine(center, pathElements[0]);
+                for (let i = 0; i < pathElements.length - 1; i++) {
+                    drawLine(pathElements[i], pathElements[i + 1]);
+                }
+            }
+        }
+
+        // Handle branch click
+        branches.forEach(branch => {
+            branch.addEventListener('click', () => {
+                const text = branch.textContent.trim();
+                
+                if (branch.classList.contains('in-path')) {
+                    // Remove from path
+                    const index = currentPath.indexOf(text);
+                    if (index > -1) {
+                        currentPath.splice(index, 1);
+                    }
+                    branch.classList.remove('in-path');
+                } else {
+                    // Add to path
+                    currentPath.push(text);
+                    branch.classList.add('in-path');
+                }
+                
+                updatePoem();
+                redrawConnections();
+            });
+        });
+
+        // Clear button
+        clearBtn.addEventListener('click', () => {
+            currentPath = [];
+            branches.forEach(branch => {
+                branch.classList.remove('in-path');
+            });
+            updatePoem();
+            redrawConnections();
+        });
+
+        // Copy button
+        copyBtn.addEventListener('click', () => {
+            if (currentPath.length > 0) {
+                const poemString = currentPath.join('\n');
+                navigator.clipboard.writeText(poemString).then(() => {
+                    const originalText = copyBtn.textContent;
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => {
+                        copyBtn.textContent = originalText;
+                    }, 1500);
+                });
+            }
+        });
+
+        // Redraw lines on window resize
+        window.addEventListener('resize', () => {
+            redrawConnections();
+        });
+
+        // Initial setup
+        updatePoem();
+    </script>
+</body>
+</html>
