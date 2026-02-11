@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Museum of Shadows</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0a;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        #gameCanvas {
+            display: block;
+            background: linear-gradient(180deg, #1a1a2e 0%, #0f0f1e 100%);
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            box-shadow: 0 0 60px rgba(110, 240, 208, 0.3), inset 0 0 100px rgba(0,0,0,0.5);
+            border: 3px solid #0f3460;
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            color: #6ef0d0;
+            font-size: 13px;
+            text-shadow: 0 0 10px rgba(110, 240, 208, 0.8), 0 2px 4px rgba(0,0,0,0.8);
+            font-family: 'Courier New', monospace;
+            pointer-events: none;
+            z-index: 10;
+            letter-spacing: 1px;
+        }
+
+        .ui-overlay div {
+            margin-bottom: 5px;
+            padding: 5px 10px;
+            background: rgba(0, 0, 0, 0.6);
+            border-left: 3px solid #6ef0d0;
+        }
+
+        .health-bar {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            width: 220px;
+        }
+
+        .health-label {
+            color: #6ef0d0;
+            font-size: 11px;
+            margin-bottom: 8px;
+            text-shadow: 0 0 10px rgba(110, 240, 208, 0.8);
+            letter-spacing: 2px;
+        }
+
+        .health-bg {
+            width: 100%;
+            height: 24px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #6ef0d0;
+            box-shadow: 0 0 15px rgba(110, 240, 208, 0.4), inset 0 0 10px rgba(0,0,0,0.5);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .health-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6ef0d0 0%, #4ecdc4 50%, #6ef0d0 100%);
+            transition: width 0.3s ease;
+            box-shadow: 0 0 20px rgba(110, 240, 208, 0.6);
+            position: relative;
+        }
+
+        .health-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 50%;
+            background: linear-gradient(180deg, rgba(255,255,255,0.3), transparent);
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #6ef0d0;
+            font-size: 11px;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 12px 24px;
+            border: 2px solid #0f3460;
+            box-shadow: 0 0 20px rgba(110, 240, 208, 0.2);
+            letter-spacing: 1px;
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+
+        .scanline {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(transparent, rgba(110, 240, 208, 0.1), transparent);
+            animation: scanline 4s linear infinite;
+            pointer-events: none;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div class="scanline"></div>
+    
+    <div class="ui-overlay">
+        <div>SECTOR: PALEONTOLOGY</div>
+        <div>TIME: 02:47 AM</div>
+        <div>THREAT LEVEL: <span style="color: #ff6b6b;">HIGH</span></div>
+    </div>
+
+    <div class="health-bar">
+        <div class="health-label">◆ VITALITY ◆</div>
+        <div class="health-bg">
+            <div class="health-fill" id="healthFill" style="width: 100%"></div>
+        </div>
+    </div>
+
+    <div class="controls">
+        ← → MOVE │ SPACE JUMP │ SHIFT SLIDE │ Z ATTACK │ X ROLL
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size
+        canvas.width = 1200;
+        canvas.height = 600;
+
+        // Particle system
+        class Particle {
+            constructor(x, y, vx, vy, color, life) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.color = color;
+                this.life = life;
+                this.maxLife = life;
+                this.size = Math.random() * 3 + 2;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.2; // Gravity
+                this.life--;
+            }
+
+            draw() {
+                const alpha = this.life / this.maxLife;
+                ctx.fillStyle = this.color.replace('1)', alpha + ')');
+                ctx.fillRect(this.x - game.cameraX, this.y, this.size, this.size);
+            }
+        }
+
+        const particles = [];
+
+        // Game state
+        const game = {
+            state: 'playing',
+            cameraX: 0,
+            cameraY: 0,
+            gravity: 0.8,
+            friction: 0.85
+        };
+
+        // Player character with rotoscoped-style animation states
+        const player = {
+            x: 100,
+            y: 400,
+            width: 32,
+            height: 48,
+            velocityX: 0,
+            velocityY: 0,
+            speed: 4,
+            jumpPower: -15,
+            onGround: false,
+            health: 100,
+            maxHealth: 100,
+            state: 'idle', // idle, run, jump, slide, attack, roll
+            direction: 1, // 1 = right, -1 = left
+            animFrame: 0,
+            animTimer: 0,
+            animSpeed: 5,
+            isSliding: false,
+            isRolling: false,
+            isAttacking: false,
+            attackCooldown: 0,
+            invincible: 0
+        };
+
+        // Museum level design
+        const platforms = [
+            // Ground floor
+            { x: 0, y: 550, width: 400, height: 50, type: 'floor' },
+            { x: 500, y: 550, width: 400, height: 50, type: 'floor' },
+            { x: 1000, y: 550, width: 600, height: 50, type: 'floor' },
+            
+            // Display cases and exhibits
+            { x: 300, y: 450, width: 120, height: 20, type: 'platform' },
+            { x: 550, y: 400, width: 100, height: 20, type: 'platform' },
+            { x: 750, y: 350, width: 120, height: 20, type: 'platform' },
+            { x: 950, y: 300, width: 100, height: 20, type: 'platform' },
+            { x: 1150, y: 400, width: 150, height: 20, type: 'platform' },
+            
+            // Upper balcony
+            { x: 1300, y: 250, width: 300, height: 20, type: 'platform' },
+        ];
+
+        // Decorative museum elements
+        const decorations = [
+            { x: 150, y: 480, width: 60, height: 70, type: 'skeleton', label: 'T-REX' },
+            { x: 600, y: 330, width: 40, height: 70, type: 'fossil', label: 'TRILOBITE' },
+            { x: 1050, y: 480, width: 50, height: 60, type: 'artifact', label: 'VASE' },
+            { x: 1350, y: 180, width: 80, height: 70, type: 'dino', label: 'STEGO' }
+        ];
+
+        // Robot enemies
+        const enemies = [
+            { x: 450, y: 500, width: 40, height: 40, type: 'lizard', health: 30, velocityX: 2, patrolStart: 400, patrolEnd: 550, direction: 1, state: 'patrol', animFrame: 0 },
+            { x: 800, y: 300, width: 50, height: 45, type: 'leopard', health: 50, velocityX: 3, patrolStart: 700, patrolEnd: 900, direction: 1, state: 'patrol', animFrame: 0 },
+            { x: 1200, y: 350, width: 40, height: 40, type: 'lizard', health: 30, velocityX: 2, patrolStart: 1100, patrolEnd: 1300, direction: 1, state: 'patrol', animFrame: 0 }
+        ];
+
+        // Input handling
+        const keys = {};
+        
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            
+            if (e.key === ' ' && player.onGround && !player.isSliding && !player.isRolling) {
+                player.velocityY = player.jumpPower;
+                player.onGround = false;
+                player.state = 'jump';
+            }
+            
+            if (e.key === 'Shift' && player.onGround && !player.isSliding) {
+                player.isSliding = true;
+                player.state = 'slide';
+                setTimeout(() => {
+                    player.isSliding = false;
+                }, 400);
+            }
+            
+            if (e.key === 'x' && !player.isRolling && player.onGround) {
+                player.isRolling = true;
+                player.state = 'roll';
+                player.invincible = 20;
+                setTimeout(() => {
+                    player.isRolling = false;
+                }, 500);
+            }
+            
+            if (e.key === 'z' && !player.isAttacking && player.attackCooldown === 0) {
+                player.isAttacking = true;
+                player.state = 'attack';
+                player.attackCooldown = 30;
+                setTimeout(() => {
+                    player.isAttacking = false;
+                }, 300);
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+
+        // Update player physics and animation
+        function updatePlayer() {
+            // Horizontal movement
+            if (keys['ArrowLeft'] && !player.isSliding && !player.isAttacking) {
+                player.velocityX = -player.speed;
+                player.direction = -1;
+                if (player.onGround && player.state !== 'slide' && player.state !== 'roll') {
+                    player.state = 'run';
+                }
+            } else if (keys['ArrowRight'] && !player.isSliding && !player.isAttacking) {
+                player.velocityX = player.speed;
+                player.direction = 1;
+                if (player.onGround && player.state !== 'slide' && player.state !== 'roll') {
+                    player.state = 'run';
+                }
+            } else if (!player.isSliding && !player.isAttacking && !player.isRolling) {
+                player.velocityX *= game.friction;
+                if (Math.abs(player.velocityX) < 0.1) {
+                    player.velocityX = 0;
+                    if (player.onGround && player.state === 'run') {
+                        player.state = 'idle';
+                    }
+                }
+            }
+
+            // Sliding boost
+            if (player.isSliding) {
+                player.velocityX = player.speed * 2.5 * player.direction;
+            }
+
+            // Rolling boost
+            if (player.isRolling) {
+                player.velocityX = player.speed * 1.8 * player.direction;
+            }
+
+            // Gravity
+            player.velocityY += game.gravity;
+            
+            // Apply velocity
+            player.x += player.velocityX;
+            player.y += player.velocityY;
+
+            // Platform collision
+            player.onGround = false;
+            
+            platforms.forEach(platform => {
+                if (player.x + player.width > platform.x &&
+                    player.x < platform.x + platform.width &&
+                    player.y + player.height > platform.y &&
+                    player.y + player.height < platform.y + 30 &&
+                    player.velocityY >= 0) {
+                    
+                    player.y = platform.y - player.height;
+                    player.velocityY = 0;
+                    player.onGround = true;
+                    
+                    if (player.state === 'jump') {
+                        player.state = 'idle';
+                    }
+                }
+            });
+
+            // Update animation
+            player.animTimer++;
+            if (player.animTimer >= player.animSpeed) {
+                player.animTimer = 0;
+                player.animFrame = (player.animFrame + 1) % 4;
+            }
+
+            // Update cooldowns
+            if (player.attackCooldown > 0) player.attackCooldown--;
+            if (player.invincible > 0) player.invincible--;
+
+            // Camera follow
+            game.cameraX = player.x - canvas.width / 3;
+            game.cameraX = Math.max(0, Math.min(game.cameraX, 1600 - canvas.width));
+        }
+
+        // Update enemies
+        function updateEnemies() {
+            enemies.forEach(enemy => {
+                if (enemy.health <= 0) return;
+
+                // Patrol behavior
+                enemy.x += enemy.velocityX * enemy.direction;
+                
+                if (enemy.x <= enemy.patrolStart || enemy.x >= enemy.patrolEnd) {
+                    enemy.direction *= -1;
+                }
+
+                // Animation
+                enemy.animFrame = (enemy.animFrame + 0.1) % 4;
+
+                // Check collision with player attacks
+                if (player.isAttacking || player.isRolling) {
+                    const attackRange = player.isRolling ? 60 : 70;
+                    const playerCenter = player.x + player.width / 2;
+                    const enemyCenter = enemy.x + enemy.width / 2;
+                    
+                    if (Math.abs(playerCenter - enemyCenter) < attackRange &&
+                        Math.abs(player.y - enemy.y) < 60) {
+                        enemy.health -= 1;
+                        enemy.x += player.direction * 8; // Knockback
+                    }
+                }
+
+                // Enemy attacks player
+                if (!player.invincible && 
+                    Math.abs(player.x - enemy.x) < 50 &&
+                    Math.abs(player.y - enemy.y) < 50) {
+                    player.health = Math.max(0, player.health - 0.5);
+                    updateHealthBar();
+                }
+            });
+        }
+
+        // Draw player with enhanced pixel art
+        function drawPlayer() {
+            ctx.save();
+            ctx.translate(player.x - game.cameraX, player.y);
+            
+            if (player.direction === -1) {
+                ctx.scale(-1, 1);
+            }
+
+            // Shadow with gradient
+            const shadowGradient = ctx.createRadialGradient(0, player.height + 2, 0, 0, player.height + 2, 20);
+            shadowGradient.addColorStop(0, 'rgba(0, 0, 0, 0.4)');
+            shadowGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = shadowGradient;
+            ctx.fillRect(-16, player.height + 2, 32, 8);
+
+            // Invincibility flash
+            if (player.invincible > 0 && Math.floor(player.invincible / 3) % 2 === 0) {
+                ctx.globalAlpha = 0.5;
+            }
+
+            // Enhanced sprite rendering with details
+            const primaryColor = '#6ef0d0';
+            const darkColor = '#4a9d8a';
+            const accentColor = '#8fffd8';
+            const shadowColor = '#2a6d5a';
+            
+            if (player.state === 'idle') {
+                // Idle breathing animation
+                const breathe = Math.sin(Date.now() * 0.003) * 1;
+                
+                // Head
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-10, 0 + breathe, 20, 12);
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(-8, 2 + breathe, 4, 4); // Eye
+                ctx.fillRect(4, 2 + breathe, 4, 4);
+                
+                // Body/torso
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-12, 12 + breathe, 24, 8);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-12, 20 + breathe, 24, 18);
+                
+                // Details on torso
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(-6, 24 + breathe, 2, 2);
+                ctx.fillRect(4, 24 + breathe, 2, 2);
+                ctx.fillRect(-2, 28 + breathe, 4, 4);
+                
+                // Arms
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-16, 14 + breathe, 4, 18);
+                ctx.fillRect(12, 14 + breathe, 4, 18);
+                ctx.fillStyle = shadowColor;
+                ctx.fillRect(-16, 28 + breathe, 4, 4);
+                ctx.fillRect(12, 28 + breathe, 4, 4);
+                
+                // Legs
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-10, 38 + breathe, 8, 6);
+                ctx.fillRect(2, 38 + breathe, 8, 6);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-10, 44 + breathe, 8, 4);
+                ctx.fillRect(2, 44 + breathe, 8, 4);
+                
+            } else if (player.state === 'run') {
+                // Running animation
+                const cycle = Math.floor(player.animFrame) % 4;
+                const bob = Math.sin(player.animFrame * 1.5) * 2;
+                const armSwing = Math.sin(player.animFrame * 2) * 6;
+                const legStride = Math.sin(player.animFrame * 2) * 8;
+                
+                // Head
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-10, 0 + bob, 20, 12);
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(-8, 2 + bob, 4, 4);
+                ctx.fillRect(4, 2 + bob, 4, 4);
+                
+                // Body leaning forward
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-12, 10 + bob, 24, 8);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-11, 18 + bob, 22, 16);
+                
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(-2, 22 + bob, 4, 4);
+                
+                // Arms swinging
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-16, 12 + bob + armSwing, 4, 16);
+                ctx.fillRect(12, 12 + bob - armSwing, 4, 16);
+                
+                // Legs alternating
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-10, 34 + bob, 8, 6);
+                ctx.fillRect(2, 34 + bob, 8, 6);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-10, 40 + bob + legStride, 8, 8);
+                ctx.fillRect(2, 40 + bob - legStride, 8, 8);
+                
+                // Motion blur effect
+                if (Math.abs(player.velocityX) > 2) {
+                    ctx.globalAlpha = 0.3;
+                    ctx.fillStyle = primaryColor;
+                    ctx.fillRect(-player.direction * 8, 12, 6, 30);
+                    ctx.globalAlpha = 1;
+                }
+                
+            } else if (player.state === 'jump') {
+                // Jumping pose - extended upward
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-10, 2, 20, 12);
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(-8, 4, 4, 4);
+                ctx.fillRect(4, 4, 4, 4);
+                
+                // Body
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-12, 14, 24, 8);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-11, 22, 22, 14);
+                
+                // Arms raised
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-18, 10, 4, 12);
+                ctx.fillRect(14, 10, 4, 12);
+                
+                // Legs tucked
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-10, 36, 8, 6);
+                ctx.fillRect(2, 36, 8, 6);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-10, 42, 8, 6);
+                ctx.fillRect(2, 42, 8, 6);
+                
+            } else if (player.state === 'slide') {
+                // Sliding pose - horizontal
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-8, 16, 20, 10);
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(-6, 18, 4, 3);
+                ctx.fillRect(2, 18, 4, 3);
+                
+                // Body horizontal
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-16, 20, 32, 10);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-16, 30, 32, 10);
+                
+                // Legs extended
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-20, 34, 12, 6);
+                
+                // Slide particles
+                if (Math.random() > 0.7) {
+                    particles.push(new Particle(
+                        player.x - player.direction * 20,
+                        player.y + 40,
+                        -player.velocityX * 0.5 + (Math.random() - 0.5) * 2,
+                        -Math.random() * 2,
+                        'rgba(110, 240, 208, 1)',
+                        20
+                    ));
+                }
+                
+            } else if (player.state === 'roll') {
+                // Rolling animation - circular motion
+                const angle = (player.animFrame * Math.PI / 2) % (Math.PI * 2);
+                ctx.save();
+                ctx.rotate(angle);
+                
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-16, -16, 32, 32);
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-12, -12, 24, 24);
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(-8, -8, 16, 16);
+                ctx.fillStyle = shadowColor;
+                ctx.fillRect(-4, -4, 8, 8);
+                
+                ctx.restore();
+                
+                // Roll particles
+                if (Math.random() > 0.8) {
+                    particles.push(new Particle(
+                        player.x,
+                        player.y + 24,
+                        (Math.random() - 0.5) * 4,
+                        -Math.random() * 3,
+                        'rgba(110, 240, 208, 1)',
+                        15
+                    ));
+                }
+                
+            } else if (player.state === 'attack') {
+                // Attack pose with extended strike
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-10, 2, 20, 12);
+                ctx.fillStyle = accentColor;
+                ctx.fillRect(-8, 4, 4, 4);
+                ctx.fillRect(4, 4, 4, 4);
+                
+                // Body
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-12, 14, 24, 8);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-11, 22, 22, 16);
+                
+                // Extended attacking arm
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-16, 16, 4, 14);
+                ctx.fillRect(12, 12, 18, 4);
+                
+                // Other arm back
+                ctx.fillStyle = shadowColor;
+                ctx.fillRect(-18, 18, 4, 10);
+                
+                // Legs
+                ctx.fillStyle = darkColor;
+                ctx.fillRect(-10, 38, 8, 6);
+                ctx.fillRect(2, 38, 8, 6);
+                ctx.fillStyle = primaryColor;
+                ctx.fillRect(-10, 44, 8, 4);
+                ctx.fillRect(2, 44, 8, 4);
+                
+                // Attack effect - energy blast
+                ctx.fillStyle = 'rgba(255, 107, 107, 0.8)';
+                ctx.fillRect(22, 10, 20, 8);
+                ctx.fillStyle = 'rgba(255, 150, 150, 0.6)';
+                ctx.fillRect(30, 8, 15, 12);
+                ctx.fillStyle = 'rgba(255, 200, 200, 0.4)';
+                ctx.fillRect(38, 6, 12, 16);
+                
+                // Impact particles
+                for (let i = 0; i < 3; i++) {
+                    ctx.fillStyle = `rgba(255, ${100 + i * 50}, ${100 + i * 50}, ${0.8 - i * 0.2})`;
+                    ctx.fillRect(40 + i * 6, 12 + (Math.random() - 0.5) * 8, 4, 4);
+                }
+            }
+
+            ctx.restore();
+        }
+
+        // Draw enemies with enhanced pixel art
+        function drawEnemies() {
+            enemies.forEach(enemy => {
+                if (enemy.health <= 0) {
+                    // Death animation particles
+                    if (Math.random() > 0.5) {
+                        particles.push(new Particle(
+                            enemy.x + enemy.width / 2,
+                            enemy.y + enemy.height / 2,
+                            (Math.random() - 0.5) * 6,
+                            -Math.random() * 6,
+                            enemy.type === 'lizard' ? 'rgba(255, 107, 107, 1)' : 'rgba(255, 140, 66, 1)',
+                            30
+                        ));
+                    }
+                    return;
+                }
+
+                ctx.save();
+                ctx.translate(enemy.x - game.cameraX, enemy.y);
+                
+                if (enemy.direction === -1) {
+                    ctx.scale(-1, 1);
+                }
+
+                // Shadow
+                const shadowGradient = ctx.createRadialGradient(0, enemy.height + 2, 0, 0, enemy.height + 2, enemy.width);
+                shadowGradient.addColorStop(0, 'rgba(0, 0, 0, 0.4)');
+                shadowGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = shadowGradient;
+                ctx.fillRect(-enemy.width/2, enemy.height + 2, enemy.width, 6);
+
+                if (enemy.type === 'lizard') {
+                    const walkCycle = Math.sin(enemy.animFrame * 2) * 2;
+                    
+                    // Robot lizard - mechanical details
+                    // Body core
+                    ctx.fillStyle = '#ff6b6b';
+                    ctx.fillRect(-16, 10, 32, 16);
+                    
+                    // Armored plates
+                    ctx.fillStyle = '#cc4444';
+                    ctx.fillRect(-14, 12, 6, 4);
+                    ctx.fillRect(-4, 12, 6, 4);
+                    ctx.fillRect(6, 12, 6, 4);
+                    
+                    ctx.fillRect(-14, 18, 6, 4);
+                    ctx.fillRect(-4, 18, 6, 4);
+                    ctx.fillRect(6, 18, 6, 4);
+                    
+                    // Mechanical joints
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(-12, 14, 2, 2);
+                    ctx.fillRect(-2, 14, 2, 2);
+                    ctx.fillRect(8, 14, 2, 2);
+                    
+                    // Legs with walking animation
+                    ctx.fillStyle = '#ff6b6b';
+                    ctx.fillRect(-10, 26, 6, 6 + walkCycle);
+                    ctx.fillRect(4, 26, 6, 6 - walkCycle);
+                    
+                    // Feet
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(-12, 32 + walkCycle, 8, 3);
+                    ctx.fillRect(2, 32 - walkCycle, 8, 3);
+                    
+                    // Head
+                    ctx.fillStyle = '#ff8888';
+                    ctx.fillRect(-22, 12, 10, 10);
+                    
+                    // Jaw detail
+                    ctx.fillStyle = '#cc4444';
+                    ctx.fillRect(-22, 18, 10, 4);
+                    
+                    // Glowing eye
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillRect(-24, 14, 4, 4);
+                    ctx.fillStyle = '#ffff88';
+                    ctx.fillRect(-23, 15, 2, 2);
+                    
+                    // Eye glow effect
+                    ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+                    ctx.fillRect(-26, 12, 6, 8);
+                    
+                    // Tail with segments
+                    ctx.fillStyle = '#ff6b6b';
+                    ctx.fillRect(16, 14, 8, 6);
+                    ctx.fillRect(22, 15, 6, 4);
+                    ctx.fillRect(26, 16, 4, 3);
+                    
+                    ctx.fillStyle = '#cc4444';
+                    ctx.fillRect(18, 16, 2, 2);
+                    ctx.fillRect(24, 16, 2, 2);
+                    
+                } else if (enemy.type === 'leopard') {
+                    const prowl = Math.sin(enemy.animFrame * 1.5) * 3;
+                    
+                    // Robot leopard - sleek and dangerous
+                    // Main body
+                    ctx.fillStyle = '#ff8c42';
+                    ctx.fillRect(-22, 6 + prowl, 44, 20);
+                    
+                    // Armored segments
+                    ctx.fillStyle = '#cc6622';
+                    ctx.fillRect(-20, 8 + prowl, 8, 6);
+                    ctx.fillRect(-8, 8 + prowl, 8, 6);
+                    ctx.fillRect(4, 8 + prowl, 8, 6);
+                    ctx.fillRect(16, 8 + prowl, 6, 6);
+                    
+                    // Spots - mechanical panels
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(-18, 10 + prowl, 4, 4);
+                    ctx.fillRect(-6, 12 + prowl, 4, 4);
+                    ctx.fillRect(6, 10 + prowl, 4, 4);
+                    ctx.fillRect(18, 12 + prowl, 4, 4);
+                    
+                    ctx.fillRect(-16, 18 + prowl, 3, 3);
+                    ctx.fillRect(-4, 19 + prowl, 3, 3);
+                    ctx.fillRect(8, 18 + prowl, 3, 3);
+                    
+                    // Legs with prowl animation
+                    const leg1 = Math.sin(enemy.animFrame * 2) * 4;
+                    const leg2 = Math.sin(enemy.animFrame * 2 + Math.PI) * 4;
+                    
+                    ctx.fillStyle = '#ff8c42';
+                    ctx.fillRect(-18, 26 + prowl, 6, 8 + leg1);
+                    ctx.fillRect(-6, 26 + prowl, 6, 8 + leg2);
+                    ctx.fillRect(6, 26 + prowl, 6, 8 + leg1);
+                    ctx.fillRect(18, 26 + prowl, 6, 8 + leg2);
+                    
+                    // Paws
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(-20, 34 + prowl + leg1, 8, 4);
+                    ctx.fillRect(-8, 34 + prowl + leg2, 8, 4);
+                    ctx.fillRect(4, 34 + prowl + leg1, 8, 4);
+                    ctx.fillRect(16, 34 + prowl + leg2, 8, 4);
+                    
+                    // Head
+                    ctx.fillStyle = '#ffaa66';
+                    ctx.fillRect(-30, 8 + prowl, 12, 12);
+                    
+                    // Ears
+                    ctx.fillStyle = '#ff8c42';
+                    ctx.fillRect(-32, 6 + prowl, 4, 4);
+                    ctx.fillRect(-22, 6 + prowl, 4, 4);
+                    
+                    // Facial details
+                    ctx.fillStyle = '#cc6622';
+                    ctx.fillRect(-30, 16 + prowl, 12, 4);
+                    
+                    // Glowing red eyes
+                    ctx.fillStyle = '#ff0000';
+                    ctx.fillRect(-32, 10 + prowl, 4, 4);
+                    ctx.fillStyle = '#ff6666';
+                    ctx.fillRect(-31, 11 + prowl, 2, 2);
+                    
+                    // Eye glow
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+                    ctx.fillRect(-34, 8 + prowl, 6, 8);
+                    
+                    // Tail
+                    ctx.fillStyle = '#ff8c42';
+                    ctx.fillRect(22, 8 + prowl, 12, 8);
+                    ctx.fillRect(32, 10 + prowl, 8, 6);
+                    ctx.fillRect(38, 12 + prowl, 6, 4);
+                    
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(24, 10 + prowl, 3, 3);
+                    ctx.fillRect(34, 12 + prowl, 2, 2);
+                }
+
+                ctx.restore();
+
+                // Health bar with enhanced design
+                if (enemy.health < (enemy.type === 'lizard' ? 30 : 50)) {
+                    const barWidth = 40;
+                    const barHeight = 6;
+                    const barX = enemy.x - game.cameraX - barWidth / 2;
+                    const barY = enemy.y - 12;
+                    
+                    // Background
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2);
+                    
+                    // Border
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(barX, barY, barWidth, barHeight);
+                    
+                    // Health fill
+                    const healthPercent = enemy.type === 'lizard' ? enemy.health / 30 : enemy.health / 50;
+                    const fillGradient = ctx.createLinearGradient(barX, barY, barX + barWidth * healthPercent, barY);
+                    fillGradient.addColorStop(0, '#ff6b6b');
+                    fillGradient.addColorStop(1, '#ff4444');
+                    ctx.fillStyle = fillGradient;
+                    ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
+                    
+                    // Shine effect
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.fillRect(barX, barY, barWidth * healthPercent, 2);
+                }
+            });
+        }
+
+        // Draw museum environment with parallax and details
+        function drawEnvironment() {
+            // Far background - deep space/night sky through windows
+            const skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            skyGradient.addColorStop(0, '#0a0a1a');
+            skyGradient.addColorStop(0.5, '#16213e');
+            skyGradient.addColorStop(1, '#1a1a2e');
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Parallax background layer 1 - distant museum halls
+            ctx.fillStyle = 'rgba(15, 52, 96, 0.3)';
+            for (let i = 0; i < 5; i++) {
+                const x = (i * 300 - game.cameraX * 0.2) % 1500;
+                ctx.fillRect(x, 100, 120, 400);
+                
+                // Archways
+                ctx.fillStyle = 'rgba(20, 60, 110, 0.4)';
+                ctx.fillRect(x + 10, 120, 100, 180);
+                ctx.fillStyle = 'rgba(15, 52, 96, 0.3)';
+            }
+
+            // Atmospheric lighting beams
+            ctx.save();
+            ctx.globalAlpha = 0.1;
+            for (let i = 0; i < 4; i++) {
+                const beamX = (200 + i * 350 - game.cameraX * 0.5) % 1600;
+                const beamGradient = ctx.createLinearGradient(beamX, 0, beamX + 100, 0);
+                beamGradient.addColorStop(0, 'rgba(110, 240, 208, 0)');
+                beamGradient.addColorStop(0.5, 'rgba(110, 240, 208, 0.4)');
+                beamGradient.addColorStop(1, 'rgba(110, 240, 208, 0)');
+                ctx.fillStyle = beamGradient;
+                ctx.fillRect(beamX, 0, 100, canvas.height);
+            }
+            ctx.restore();
+
+            // Middle background - museum walls with panels
+            ctx.fillStyle = '#1a2a3e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Wall panels and molding
+            for (let i = 0; i < 10; i++) {
+                const panelX = (i * 160 - game.cameraX * 0.7) % 1600;
+                
+                // Panel
+                ctx.fillStyle = '#162638';
+                ctx.fillRect(panelX, 80, 140, 300);
+                
+                // Panel border
+                ctx.strokeStyle = '#0f3460';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(panelX + 5, 85, 130, 290);
+                
+                // Inner decorative border
+                ctx.strokeStyle = '#1a4d7a';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(panelX + 10, 90, 120, 280);
+            }
+
+            // Ceiling lights casting down
+            for (let i = 0; i < 8; i++) {
+                const lightX = (150 + i * 200 - game.cameraX * 0.8);
+                if (lightX > -100 && lightX < canvas.width + 100) {
+                    // Light fixture
+                    ctx.fillStyle = '#0f3460';
+                    ctx.fillRect(lightX - 20, 20, 40, 15);
+                    
+                    // Light glow
+                    const lightGlow = ctx.createRadialGradient(lightX, 35, 5, lightX, 35, 80);
+                    lightGlow.addColorStop(0, 'rgba(110, 240, 208, 0.15)');
+                    lightGlow.addColorStop(1, 'rgba(110, 240, 208, 0)');
+                    ctx.fillStyle = lightGlow;
+                    ctx.fillRect(lightX - 80, 35, 160, 200);
+                }
+            }
+
+            // Draw platforms with enhanced details
+            platforms.forEach(platform => {
+                const platX = platform.x - game.cameraX;
+                
+                // Platform shadow
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.fillRect(platX + 5, platform.y + platform.height, platform.width, 4);
+                
+                // Main platform
+                if (platform.type === 'floor') {
+                    // Floor gradient
+                    const floorGrad = ctx.createLinearGradient(platX, platform.y, platX, platform.y + platform.height);
+                    floorGrad.addColorStop(0, '#1a3a5a');
+                    floorGrad.addColorStop(1, '#0f2540');
+                    ctx.fillStyle = floorGrad;
+                    ctx.fillRect(platX, platform.y, platform.width, platform.height);
+                    
+                    // Floor tiles
+                    ctx.strokeStyle = '#0a1a2a';
+                    ctx.lineWidth = 2;
+                    for (let i = 0; i < platform.width; i += 40) {
+                        ctx.beginPath();
+                        ctx.moveTo(platX + i, platform.y);
+                        ctx.lineTo(platX + i, platform.y + platform.height);
+                        ctx.stroke();
+                    }
+                } else {
+                    // Display platform gradient
+                    const platGrad = ctx.createLinearGradient(platX, platform.y, platX, platform.y + platform.height);
+                    platGrad.addColorStop(0, '#6a5a8a');
+                    platGrad.addColorStop(1, '#533483');
+                    ctx.fillStyle = platGrad;
+                    ctx.fillRect(platX, platform.y, platform.width, platform.height);
+                    
+                    // Glass case effect on platforms
+                    ctx.fillStyle = 'rgba(110, 240, 208, 0.1)';
+                    ctx.fillRect(platX, platform.y, platform.width, 3);
+                }
+                
+                // Platform edge highlight
+                ctx.strokeStyle = '#6ef0d0';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(platX, platform.y, platform.width, platform.height);
+                
+                // Platform inner shadow
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(platX + 1, platform.y + 1, platform.width - 2, platform.height - 2);
+            });
+
+            // Draw enhanced museum decorations
+            decorations.forEach(dec => {
+                const decX = dec.x - game.cameraX;
+                if (decX < -100 || decX > canvas.width + 100) return;
+                
+                ctx.save();
+                ctx.translate(decX, dec.y);
+
+                // Spotlight on exhibits
+                const spotlight = ctx.createRadialGradient(dec.width/2, -20, 5, dec.width/2, dec.height/2, dec.width);
+                spotlight.addColorStop(0, 'rgba(110, 240, 208, 0.2)');
+                spotlight.addColorStop(1, 'rgba(110, 240, 208, 0)');
+                ctx.fillStyle = spotlight;
+                ctx.fillRect(-20, -30, dec.width + 40, dec.height + 50);
+
+                if (dec.type === 'skeleton') {
+                    // Enhanced T-Rex skeleton
+                    ctx.strokeStyle = '#9a9a9a';
+                    ctx.lineWidth = 4;
+                    
+                    // Spine
+                    ctx.beginPath();
+                    ctx.moveTo(15, 65);
+                    ctx.lineTo(18, 50);
+                    ctx.lineTo(20, 35);
+                    ctx.lineTo(18, 20);
+                    ctx.lineTo(12, 10);
+                    ctx.stroke();
+                    
+                    // Ribs
+                    for (let i = 0; i < 4; i++) {
+                        ctx.beginPath();
+                        ctx.arc(18, 35 + i * 8, 8, Math.PI, 0);
+                        ctx.stroke();
+                    }
+                    
+                    // Head
+                    ctx.fillStyle = '#7a7a7a';
+                    ctx.fillRect(5, 5, 18, 12);
+                    ctx.fillStyle = '#5a5a5a';
+                    ctx.fillRect(2, 8, 8, 6);
+                    
+                    // Eye socket
+                    ctx.fillStyle = '#2a2a2a';
+                    ctx.fillRect(8, 8, 4, 4);
+                    
+                    // Teeth
+                    ctx.fillStyle = '#aaa';
+                    for (let i = 0; i < 5; i++) {
+                        ctx.fillRect(3 + i * 3, 13, 2, 4);
+                    }
+                    
+                    // Body
+                    ctx.fillStyle = '#8a8a8a';
+                    ctx.fillRect(15, 25, 25, 18);
+                    
+                    // Legs
+                    ctx.strokeStyle = '#7a7a7a';
+                    ctx.lineWidth = 5;
+                    ctx.beginPath();
+                    ctx.moveTo(20, 43);
+                    ctx.lineTo(20, 60);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(32, 43);
+                    ctx.lineTo(32, 60);
+                    ctx.stroke();
+                    
+                } else if (dec.type === 'fossil') {
+                    // Enhanced trilobite fossil
+                    ctx.fillStyle = '#8a7a6a';
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+                    ctx.shadowBlur = 5;
+                    
+                    ctx.beginPath();
+                    ctx.ellipse(20, 35, 16, 28, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.shadowBlur = 0;
+                    
+                    // Segments
+                    ctx.strokeStyle = '#6a5a4a';
+                    ctx.lineWidth = 2;
+                    for (let i = 0; i < 6; i++) {
+                        ctx.beginPath();
+                        ctx.ellipse(20, 15 + i * 8, 14 - i, 6, 0, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                    
+                    // Side legs imprints
+                    ctx.strokeStyle = '#5a4a3a';
+                    ctx.lineWidth = 1;
+                    for (let i = 0; i < 10; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(8, 15 + i * 4);
+                        ctx.lineTo(2, 17 + i * 4);
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(32, 15 + i * 4);
+                        ctx.lineTo(38, 17 + i * 4);
+                        ctx.stroke();
+                    }
+                    
+                } else if (dec.type === 'artifact') {
+                    // Enhanced ancient vase
+                    ctx.fillStyle = '#8b6f4f';
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+                    ctx.shadowBlur = 8;
+                    
+                    // Vase body
+                    ctx.beginPath();
+                    ctx.moveTo(20, 10);
+                    ctx.lineTo(15, 15);
+                    ctx.lineTo(12, 25);
+                    ctx.lineTo(13, 50);
+                    ctx.lineTo(25, 60);
+                    ctx.lineTo(37, 50);
+                    ctx.lineTo(38, 25);
+                    ctx.lineTo(35, 15);
+                    ctx.lineTo(30, 10);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    ctx.shadowBlur = 0;
+                    
+                    // Decorative bands
+                    ctx.fillStyle = '#6a5a3f';
+                    ctx.fillRect(15, 18, 20, 3);
+                    ctx.fillRect(14, 32, 22, 3);
+                    ctx.fillRect(15, 46, 20, 3);
+                    
+                    // Pattern details
+                    ctx.fillStyle = '#4a3a2f';
+                    for (let i = 0; i < 5; i++) {
+                        ctx.fillRect(16 + i * 4, 35, 2, 8);
+                    }
+                    
+                    // Neck
+                    ctx.fillStyle = '#9b7f5f';
+                    ctx.fillRect(18, 5, 14, 7);
+                    
+                } else if (dec.type === 'dino') {
+                    // Enhanced Stegosaurus
+                    ctx.fillStyle = '#5a7d5a';
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+                    ctx.shadowBlur = 6;
+                    
+                    // Body
+                    ctx.fillRect(10, 40, 65, 22);
+                    
+                    ctx.shadowBlur = 0;
+                    
+                    // Body shading
+                    ctx.fillStyle = '#4a6d4a';
+                    ctx.fillRect(10, 56, 65, 6);
+                    
+                    // Legs with joints
+                    ctx.fillStyle = '#5a7d5a';
+                    const legs = [8, 28, 48, 68];
+                    legs.forEach(legX => {
+                        ctx.fillRect(legX, 58, 9, 8);
+                        ctx.fillRect(legX + 1, 66, 7, 8);
+                        
+                        // Foot
+                        ctx.fillStyle = '#4a6d4a';
+                        ctx.fillRect(legX - 1, 72, 11, 3);
+                        ctx.fillStyle = '#5a7d5a';
+                    });
+                    
+                    // Back plates
+                    ctx.fillStyle = '#7a9d7a';
+                    const plates = [12, 24, 36, 48, 60];
+                    plates.forEach((plateX, i) => {
+                        const height = 18 - Math.abs(i - 2) * 2;
+                        ctx.beginPath();
+                        ctx.moveTo(plateX, 40);
+                        ctx.lineTo(plateX + 4, 40 - height);
+                        ctx.lineTo(plateX + 10, 40 - height);
+                        ctx.lineTo(plateX + 14, 40);
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        // Plate detail
+                        ctx.fillStyle = '#6a8d6a';
+                        ctx.fillRect(plateX + 5, 40 - height + 2, 4, height - 4);
+                        ctx.fillStyle = '#7a9d7a';
+                    });
+                    
+                    // Head
+                    ctx.fillStyle = '#6a8d6a';
+                    ctx.fillRect(0, 45, 12, 10);
+                    
+                    // Eye
+                    ctx.fillStyle = '#2a2a2a';
+                    ctx.fillRect(2, 48, 3, 3);
+                    
+                    // Tail
+                    ctx.fillStyle = '#5a7d5a';
+                    ctx.fillRect(73, 45, 10, 8);
+                    
+                    // Tail spikes
+                    ctx.fillStyle = '#7a9d7a';
+                    ctx.beginPath();
+                    ctx.moveTo(80, 45);
+                    ctx.lineTo(84, 38);
+                    ctx.lineTo(86, 45);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.moveTo(80, 53);
+                    ctx.lineTo(84, 60);
+                    ctx.lineTo(86, 53);
+                    ctx.fill();
+                }
+
+                // Exhibit label plate
+                ctx.fillStyle = 'rgba(15, 52, 96, 0.8)';
+                ctx.fillRect(-5, 78, dec.width + 10, 20);
+                
+                ctx.strokeStyle = '#6ef0d0';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(-5, 78, dec.width + 10, 20);
+                
+                // Label text
+                ctx.fillStyle = '#6ef0d0';
+                ctx.font = 'bold 10px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(dec.label, dec.width / 2, 90);
+                
+                ctx.shadowColor = 'rgba(110, 240, 208, 0.5)';
+                ctx.shadowBlur = 3;
+                ctx.fillText(dec.label, dec.width / 2, 90);
+                ctx.shadowBlur = 0;
+
+                ctx.restore();
+            });
+
+            // Foreground ambient particles (floating dust in museum light)
+            const time = Date.now() * 0.0001;
+            for (let i = 0; i < 40; i++) {
+                const x = (i * 73 + time * 50 + game.cameraX * 0.3) % (canvas.width + 200) - 100;
+                const y = (i * 47 + Math.sin(time * 2 + i) * 20) % canvas.height;
+                const size = 1 + (i % 3);
+                const alpha = 0.1 + (Math.sin(time * 3 + i) * 0.05);
+                
+                ctx.fillStyle = `rgba(110, 240, 208, ${alpha})`;
+                ctx.fillRect(x, y, size, size);
+                
+                // Glow
+                if (size > 1) {
+                    ctx.fillStyle = `rgba(110, 240, 208, ${alpha * 0.3})`;
+                    ctx.fillRect(x - 1, y - 1, size + 2, size + 2);
+                }
+            }
+
+            // Update and draw particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                if (particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                } else {
+                    particles[i].draw();
+                }
+            }
+        }
+
+        // Update health bar
+        function updateHealthBar() {
+            const healthPercent = (player.health / player.maxHealth) * 100;
+            document.getElementById('healthFill').style.width = healthPercent + '%';
+        }
+
+        // Game loop
+        function gameLoop() {
+            updatePlayer();
+            updateEnemies();
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawEnvironment();
+            drawEnemies();
+            drawPlayer();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game
+        gameLoop();
+    </script>
+</body>
+</html>
